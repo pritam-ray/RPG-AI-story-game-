@@ -26,12 +26,19 @@ export async function generateStory(gameState, playerAction) {
       model: deploymentName,
       messages: messages,
       temperature: 0.8,
-      max_tokens: 1000,
+      max_tokens: 350,
       response_format: { type: "json_object" },
     });
 
     const content = response.choices[0].message.content;
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    
+    // Log token usage for monitoring
+    if (response.usage) {
+      console.log('Token usage:', response.usage);
+    }
+    
+    return parsed;
   } catch (error) {
     console.error("Azure OpenAI Error:", error);
     throw new Error(`Failed to generate story: ${error.message}`);
@@ -40,6 +47,7 @@ export async function generateStory(gameState, playerAction) {
 
 /**
  * Build message array for Azure OpenAI
+ * Only keeps last 3 turns + summary to reduce tokens
  */
 function buildMessages(gameState, playerAction) {
   const { theme, characterStats, storyHistory } = gameState;
@@ -47,23 +55,54 @@ function buildMessages(gameState, playerAction) {
   const systemPrompt = getSystemPrompt(theme);
   const messages = [{ role: "system", content: systemPrompt }];
 
-  // Add story history
+  // Handle story history with summarization
   if (storyHistory && storyHistory.length > 0) {
-    storyHistory.forEach((entry) => {
+    const KEEP_LAST_N_TURNS = 3;
+    
+    if (storyHistory.length > KEEP_LAST_N_TURNS) {
+      // Add summary of older history
+      const oldHistory = storyHistory.slice(0, -KEEP_LAST_N_TURNS);
+      const summary = summarizeHistory(oldHistory);
       messages.push({
-        role: "assistant",
-        content: JSON.stringify({
-          narration: entry.narration,
-          choices: entry.choices,
-        }),
+        role: "system",
+        content: `Previous story summary: ${summary}`,
       });
-      if (entry.playerAction) {
+      
+      // Add only recent turns
+      const recentHistory = storyHistory.slice(-KEEP_LAST_N_TURNS);
+      recentHistory.forEach((entry) => {
         messages.push({
-          role: "user",
-          content: `Player chose: ${entry.playerAction}`,
+          role: "assistant",
+          content: JSON.stringify({
+            narration: entry.narration,
+            choices: entry.choices,
+          }),
         });
-      }
-    });
+        if (entry.playerAction) {
+          messages.push({
+            role: "user",
+            content: `Player chose: ${entry.playerAction}`,
+          });
+        }
+      });
+    } else {
+      // Less than threshold, include all history
+      storyHistory.forEach((entry) => {
+        messages.push({
+          role: "assistant",
+          content: JSON.stringify({
+            narration: entry.narration,
+            choices: entry.choices,
+          }),
+        });
+        if (entry.playerAction) {
+          messages.push({
+            role: "user",
+            content: `Player chose: ${entry.playerAction}`,
+          });
+        }
+      });
+    }
   }
 
   // Add current player action
@@ -88,48 +127,20 @@ function getSystemPrompt(theme) {
 
   const themeDesc = themeDescriptions[theme] || themeDescriptions["medieval-fantasy"];
 
-  return `You are an expert Dungeon Master running an immersive RPG adventure set in ${themeDesc}.
+  return `You are a Dungeon Master for an RPG set in ${themeDesc}.
 
-CRITICAL RULES:
-- Write clear, easy-to-visualize narratives (2-3 short paragraphs)
-- Use simple, concrete descriptions - avoid overly complex or abstract imagery
-- Focus on what the player sees, hears, and feels in the moment
-- Show character growth through actions and small victories
-- Always provide exactly 3-4 meaningful choices at the end
-- Each choice should lead to different story branches and consequences
-- Track and reference the player's stats (health, mana, strength, intelligence, charisma) naturally
-- Consider character stats when determining outcomes (e.g., high strength allows physical feats, high intelligence solves puzzles)
-- Use straightforward language and familiar concepts
-- Build tension gradually through clear cause-and-effect
-- Remember previous story events and show how the character has grown
-- Let the player feel their character becoming stronger, wiser, or more confident
-- Include opportunities to find items, gain experience, or improve stats
-- Show character development through small moments of courage, wisdom, or compassion
+RULES:
+- Write 2-3 short, clear paragraphs
+- Simple descriptions, concrete details (colors, sounds, emotions)
+- Show character growth through actions
+- Provide 3-4 meaningful choices
+- Consider player stats in outcomes
+- Straightforward language, familiar concepts
+- Track items found/used accurately
 
-CHARACTER STATS IMPACT:
-- Health: Determines survival in combat and dangerous situations
-- Mana: Required for magical abilities and spells
-- Strength: Physical prowess, combat effectiveness, carrying capacity
-- Intelligence: Problem-solving, magic power, understanding ancient texts
-- Charisma: Persuasion, negotiation, leadership, making allies
+STATS: Health (survival), Mana (magic), Strength (physical), Intelligence (problem-solving), Charisma (persuasion).
 
-WRITING STYLE:
-- Use simple, direct sentences
-- Describe one clear scene at a time
-- Focus on concrete details: colors, sounds, simple emotions
-- Avoid metaphors, symbolism, or abstract concepts
-- Make action sequences easy to follow step-by-step
-- Show character growth through simple achievements (e.g., "You feel braver than before")
-- Use familiar, everyday comparisons when describing new things
-- Keep dialogue natural and easy to understand
-- Let the character reflect briefly on their journey to show development
-
-CHARACTER DEVELOPMENT FOCUS:
-- Show the character learning from mistakes
-- Demonstrate growing confidence through actions
-- Build relationships with NPCs that feel meaningful
-- Reward moral choices with character growth moments
-- Reference how the character has changed since the beginning
+STYLE: Direct sentences, one scene at a time, concrete details, step-by-step action, show growth through achievements.
 
 RESPONSE FORMAT - You MUST respond with valid JSON only:
 {
@@ -164,29 +175,34 @@ INVENTORY MANAGEMENT:
  * Build user message with player action and stats
  */
 function buildUserMessage(playerAction, characterStats) {
+  const statsStr = `HP:${characterStats.health} MP:${characterStats.mana} STR:${characterStats.strength} INT:${characterStats.intelligence} CHA:${characterStats.charisma}`;
+  
   if (!playerAction) {
-    return `Begin the adventure! 
-
-Current Character Stats:
-- Health: ${characterStats.health}
-- Mana: ${characterStats.mana}
-- Strength: ${characterStats.strength}
-- Intelligence: ${characterStats.intelligence}
-- Charisma: ${characterStats.charisma}
-
-Create a simple, easy-to-visualize opening scene. Use clear descriptions and introduce the character's starting point in a relatable way. Show a small moment that hints at their potential for growth.`;
+    return `Start adventure. Stats: ${statsStr}. Create clear opening scene.`;
   }
 
-  return `Player Action: ${playerAction}
+  return `Action: ${playerAction}. Stats: ${statsStr}. Continue story.`;
+}
 
-Current Character Stats:
-- Health: ${characterStats.health}
-- Mana: ${characterStats.mana}
-- Strength: ${characterStats.strength}
-- Intelligence: ${characterStats.intelligence}
-- Charisma: ${characterStats.charisma}
+/**
+ * Summarize older story history to reduce token usage
+ */
+function summarizeHistory(historyEntries) {
+  if (!historyEntries || historyEntries.length === 0) {
+    return "The adventure has just begun.";
+  }
 
-Continue the story based on this action. Write in simple, clear language. Show one scene at a time. If the character succeeds, show a small moment of growth or confidence. Keep descriptions concrete and easy to picture.`;
+  // Extract key events from old history
+  const keyEvents = historyEntries
+    .filter(entry => entry.playerAction)
+    .map(entry => entry.playerAction)
+    .slice(-5); // Last 5 actions from old history
+
+  if (keyEvents.length === 0) {
+    return "The story started with an introduction to the world.";
+  }
+
+  return `Earlier in the adventure: ${keyEvents.join('; then ')}.`;
 }
 
 export default { generateStory };
