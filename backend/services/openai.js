@@ -142,6 +142,10 @@ STATS: Health (survival), Mana (magic), Strength (physical), Intelligence (probl
 
 STYLE: Direct sentences, one scene at a time, concrete details, step-by-step action, show growth through achievements.
 
+INVENTORY:
+- itemsFound: list new items discovered (can be empty)
+- itemsUsed: list items consumed/used (exact names, can be empty)
+
 RESPONSE FORMAT - You MUST respond with valid JSON only:
 {
   "narration": "The story text here with clear, simple descriptions...",
