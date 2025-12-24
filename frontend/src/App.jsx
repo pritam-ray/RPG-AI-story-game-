@@ -27,6 +27,8 @@ function App() {
   const [newAchievements, setNewAchievements] = useState([]);
   const [storyArc, setStoryArc] = useState('beginning');
   const [isGameEnding, setIsGameEnding] = useState(false);
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [gameOverReason, setGameOverReason] = useState(null);
 
   // Load themes on mount
   useEffect(() => {
@@ -106,6 +108,8 @@ function App() {
       setTurnCount(response.turnCount || 0);
       setStoryArc(response.storyArc || 'beginning');
       setIsGameEnding(response.isGameEnding || false);
+      setIsGameOver(response.isGameOver || false);
+      setGameOverReason(response.gameOverReason || null);
       setStoryHistory(updatedHistory);
 
       // Update achievements
@@ -166,6 +170,8 @@ function App() {
     setNewAchievements([]);
     setStoryArc('beginning');
     setIsGameEnding(false);
+    setIsGameOver(false);
+    setGameOverReason(null);
   };
 
   return (
@@ -263,12 +269,33 @@ function App() {
                 </div>
               )}
 
-              {!loading && currentChoices.length > 0 && (
+              {!loading && currentChoices.length > 0 && !isGameOver && (
                 <ChoiceButtons
                   choices={currentChoices}
                   onChoice={handleChoice}
                   disabled={loading}
                 />
+              )}
+
+              {isGameOver && (
+                <div className="game-over-container">
+                  <div className="game-over-badge">
+                    {characterStats && characterStats.health <= 0 ? '💀' : '🎭'} GAME OVER
+                  </div>
+                  <div className="game-over-reason">
+                    {gameOverReason || 'Your journey has ended'}
+                  </div>
+                  <div className="game-over-stats">
+                    <h3>📊 Final Statistics</h3>
+                    <p>🎯 Turns Survived: {turnCount}</p>
+                    <p>⭐ Level Reached: {characterStats?.level || 1}</p>
+                    <p>🏆 Achievements: {achievements.length}</p>
+                    <p>📖 Story Phase: {storyArc}</p>
+                  </div>
+                  <button className="new-game-button-large" onClick={handleNewGame}>
+                    Start New Adventure
+                  </button>
+                </div>
               )}
             </div>
 

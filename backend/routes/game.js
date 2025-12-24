@@ -150,6 +150,13 @@ router.post("/action", async (req, res) => {
     // Store the new response ID for future chaining
     gameState.previousResponseId = storyResponse.responseId;
 
+    // Check for game over condition
+    const isGameOver = storyResponse.isGameOver || gameState.characterStats.health <= 0;
+    if (isGameOver) {
+      gameState.isGameOver = true;
+      gameState.gameOverReason = storyResponse.gameOverReason || "Your journey has ended";
+    }
+
     // Update the last entry with the player's action
     if (gameState.storyHistory.length > 0) {
       gameState.storyHistory[gameState.storyHistory.length - 1].playerAction = action;
@@ -211,7 +218,7 @@ router.post("/action", async (req, res) => {
 
     res.json({
       narration: storyResponse.narration,
-      choices: storyResponse.choices,
+      choices: isGameOver ? [] : storyResponse.choices, // No choices if game over
       characterStats: gameState.characterStats,
       inventory: gameState.inventory,
       statChanges: storyResponse.statChanges,
@@ -223,6 +230,8 @@ router.post("/action", async (req, res) => {
       storyArc: gameState.storyArc,
       isGameEnding: gameState.turnCount >= 450,
       majorChoice: storyResponse.majorChoice,
+      isGameOver: isGameOver,
+      gameOverReason: gameState.gameOverReason || null,
     });
   } catch (error) {
     console.error("Error processing action:", error);

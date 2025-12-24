@@ -78,6 +78,14 @@ export async function generateStory(gameState, playerAction) {
     };
   } catch (error) {
     console.error("Azure OpenAI Responses API Error:", error);
+    
+    // If previous response not found, retry without it
+    if (error.code === 'previous_response_not_found' && previousResponseId) {
+      console.log('Previous response expired, creating new response chain...');
+      gameState.previousResponseId = null;
+      return generateStory(gameState, playerAction);
+    }
+    
     throw new Error(`Failed to generate story: ${error.message}`);
   }
 }
@@ -149,6 +157,14 @@ function getSystemPrompt(theme, turnCount = 0) {
 - Avoid "correct" answers - create trade-offs
 - Choices in early game should echo in later consequences
 
+💀 EARLY GAME ENDINGS:
+- The game can end BEFORE turn 450-500 if player makes fatal choices
+- Death scenarios: combat defeat, fatal injury, poisoning, execution, falling, starvation, etc.
+- Non-death endings: imprisonment, exile, total failure of mission, permanent curse, transformation
+- When ending early, set isGameOver: true and provide gameOverReason
+- Make endings dramatic and satisfying - show consequences of their journey
+- Even in failure, acknowledge what the player achieved before the end
+
 🎬 NARRATIVE STRUCTURE:
 - Beginning (0-20%): Introduce world, establish stakes, create mysteries
 - Rising (20-50%): Escalate conflicts, reveal consequences, deepen bonds
@@ -193,7 +209,9 @@ RESPONSE FORMAT - You MUST respond with valid JSON only:
   "achievements": [],
   "majorChoice": null,
   "relationships": {},
-  "storyArc": "beginning/rising/climax/resolution/ending"
+  "storyArc": "beginning/rising/climax/resolution/ending",
+  "isGameOver": false,
+  "gameOverReason": null
 }
 
 FIELD GUIDANCE:
@@ -223,6 +241,18 @@ FIELD GUIDANCE:
 - Update to reflect narrative progression: "beginning", "rising", "climax", "resolution", "ending"
 - Consider pacing and turn count when advancing the arc
 - Move toward "ending" as turns approach 450-500
+
+💀 isGameOver (boolean):
+- Set to true ONLY when the player's journey definitively ends
+- Triggers: Death, permanent failure, capture with no escape, successful mission completion
+- If health reaches 0 or below, this should be true
+- When true, choices array should be empty []
+
+🎭 gameOverReason (string or null):
+- Required when isGameOver is true
+- Brief description: "Killed in combat", "Died from wounds", "Executed by guards", "Starved to death"
+- Or positive: "Completed the quest", "Became the ruler", "Found eternal peace"
+- Keep it short but impactful
 
 🎒 inventory:
 - itemsFound: New items discovered (be specific)
