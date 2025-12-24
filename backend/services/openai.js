@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { AzureOpenAI } from "openai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -8,11 +8,11 @@ const apiKey = process.env.AZURE_OPENAI_API_KEY;
 const apiVersion = process.env.AZURE_OPENAI_API_VERSION;
 const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME;
 
-const client = new OpenAI({
+const client = new AzureOpenAI({
   apiKey: apiKey,
-  baseURL: `${endpoint}/openai/v1`,
-  defaultQuery: { "api-version": apiVersion },
-  defaultHeaders: { "api-key": apiKey },
+  endpoint: endpoint,
+  apiVersion: apiVersion,
+  deployment: deploymentName,
 });
 
 /**
@@ -30,7 +30,7 @@ export async function generateStory(gameState, playerAction) {
     // Build user message with progression context
     const userMessage = buildUserMessage(playerAction, characterStats, turnCount, achievements, majorChoices, storyArc, relationships);
 
-    // Create response with proper chaining
+    // Build request for Responses API
     const requestParams = {
       model: deploymentName,
       instructions: instructions,
@@ -60,9 +60,15 @@ export async function generateStory(gameState, playerAction) {
       )
       .join("");
 
+    // Validate output before parsing
+    if (!outputText || outputText.trim().length === 0) {
+      throw new Error('Empty response from Azure OpenAI');
+    }
+
     const parsed = JSON.parse(outputText);
     
     console.log('Story generated successfully via Responses API');
+    console.log('Response ID:', response.id);
     console.log('Token usage:', response.usage);
     
     // Return both the parsed content and the response ID for chaining

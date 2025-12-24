@@ -6,6 +6,18 @@ const router = express.Router();
 // In-memory game sessions (in production, use Redis or database)
 const gameSessions = new Map();
 
+// Session cleanup to prevent memory leak
+const SESSION_TIMEOUT = 24 * 60 * 60 * 1000; // 24 hours
+setInterval(() => {
+  const now = Date.now();
+  for (const [sessionId, gameState] of gameSessions.entries()) {
+    if (now - gameState.createdAt > SESSION_TIMEOUT) {
+      gameSessions.delete(sessionId);
+      console.log(`Cleaned up expired session: ${sessionId}`);
+    }
+  }
+}, 60 * 60 * 1000); // Check every hour
+
 /**
  * Start a new game
  * POST /api/game/start
@@ -41,7 +53,7 @@ router.post("/start", async (req, res) => {
       storyArc: "beginning", // beginning, rising, climax, resolution, ending
       inventory: [],
       storyHistory: [],
-      createdAt: new Date(),
+      createdAt: Date.now(), // For session cleanup
     };
 
     // Generate opening story
@@ -298,13 +310,23 @@ function generateSessionId() {
 }
 
 function applyStatChanges(currentStats, changes) {
+  // Define stat caps based on character level
+  const baseHealthCap = 100;
+  const baseManaCap = 100;
+  const levelBonus = (currentStats.level || 1) - 1;
+  const healthCap = baseHealthCap + (levelBonus * 20); // +20 HP per level
+  const manaCap = baseManaCap + (levelBonus * 15); // +15 MP per level
+  
   Object.keys(changes).forEach((stat) => {
     if (currentStats.hasOwnProperty(stat)) {
       currentStats[stat] = Math.max(0, currentStats[stat] + changes[stat]);
       
-      // Cap health and mana at reasonable maximums
-      if (stat === "health") currentStats[stat] = Math.min(currentStats[stat], 100);
-      if (stat === "mana") currentStats[stat] = Math.min(currentStats[stat], 100);
+      // Apply dynamic caps based on level
+      if (stat === "health") currentStats[stat] = Math.min(currentStats[stat], healthCap);
+      if (stat === "mana") currentStats[stat] = Math.min(currentStats[stat], manaCap);
+      if (stat === "strength") currentStats[stat] = Math.min(currentStats[stat], 50);
+      if (stat === "intelligence") currentStats[stat] = Math.min(currentStats[stat], 50);
+      if (stat === "charisma") currentStats[stat] = Math.min(currentStats[stat], 50);
     }
   });
 }
