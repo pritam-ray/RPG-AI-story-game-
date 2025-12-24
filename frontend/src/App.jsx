@@ -33,7 +33,22 @@ function App() {
   // Load themes on mount
   useEffect(() => {
     loadThemes();
+    loadSavedSession();
   }, []);
+
+  const loadSavedSession = () => {
+    try {
+      const savedSession = localStorage.getItem('dungeonMasterSession');
+      if (savedSession) {
+        const session = JSON.parse(savedSession);
+        console.log('Loaded saved session from localStorage');
+        // Optionally restore the session state
+        // setSessionId(session.sessionId);
+      }
+    } catch (err) {
+      console.error('Failed to load saved session:', err);
+    }
+  };
 
   const loadThemes = async () => {
     try {
@@ -69,6 +84,13 @@ function App() {
         choices: response.choices,
         playerAction: null,
       }]);
+
+      // Save session to localStorage
+      localStorage.setItem('dungeonMasterSession', JSON.stringify({
+        sessionId: response.sessionId,
+        responseId: response.responseId,
+        timestamp: Date.now()
+      }));
 
       setGameState('playing');
       setLoading(false);
@@ -112,6 +134,15 @@ function App() {
       setGameOverReason(response.gameOverReason || null);
       setStoryHistory(updatedHistory);
 
+      // Update session in localStorage with new responseId
+      const savedSession = localStorage.getItem('dungeonMasterSession');
+      if (savedSession) {
+        const session = JSON.parse(savedSession);
+        session.responseId = response.responseId;
+        session.timestamp = Date.now();
+        localStorage.setItem('dungeonMasterSession', JSON.stringify(session));
+      }
+
       // Update achievements
       if (response.achievements && response.achievements.length > 0) {
         setAchievements(prev => [...prev, ...response.achievements]);
@@ -154,6 +185,9 @@ function App() {
   };
 
   const handleNewGame = () => {
+    // Clear localStorage
+    localStorage.removeItem('dungeonMasterSession');
+    
     setGameState('theme-selection');
     setSessionId(null);
     setSelectedTheme(null);

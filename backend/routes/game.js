@@ -109,6 +109,7 @@ router.post("/start", async (req, res) => {
 
     res.json({
       sessionId,
+      responseId: gameState.previousResponseId,
       narration: storyResponse.narration,
       choices: storyResponse.choices,
       characterStats: gameState.characterStats,
@@ -217,6 +218,7 @@ router.post("/action", async (req, res) => {
     gameSessions.set(sessionId, gameState);
 
     res.json({
+      responseId: gameState.previousResponseId,
       narration: storyResponse.narration,
       choices: isGameOver ? [] : storyResponse.choices, // No choices if game over
       characterStats: gameState.characterStats,

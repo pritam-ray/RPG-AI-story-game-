@@ -267,33 +267,21 @@ FIELD GUIDANCE:
 }
 
 /**
- * Build user message with player action and progression context
+ * Build user message with player action and minimal context
+ * Since Responses API maintains server-side context, we only send current state
  */
 function buildUserMessage(playerAction, characterStats, turnCount = 0, achievements = [], majorChoices = [], storyArc = "beginning", relationships = {}) {
+  // With Responses API, we only send current stats and action
+  // The AI remembers all previous context via previous_response_id
   const statsStr = `HP:${characterStats.health} MP:${characterStats.mana} STR:${characterStats.strength} INT:${characterStats.intelligence} CHA:${characterStats.charisma} LVL:${characterStats.level || 1} XP:${characterStats.experience || 0}`;
   
-  const progressContext = `Turn ${turnCount}/475 (${Math.floor((turnCount / 475) * 100)}%) | Phase: ${storyArc}`;
-  
-  let contextStr = `\n📊 ${progressContext}\n🎮 Stats: ${statsStr}`;
-  
-  if (achievements.length > 0) {
-    contextStr += `\n🏆 Achievements: ${achievements.slice(-3).join(", ")}`;
-  }
-  
-  if (majorChoices.length > 0) {
-    contextStr += `\n📜 Recent Major Choices: ${majorChoices.slice(-3).join("; ")}`;
-  }
-  
-  if (Object.keys(relationships).length > 0) {
-    const relStr = Object.entries(relationships).slice(-3).map(([npc, status]) => `${npc}(${status})`).join(", ");
-    contextStr += `\n👥 Relationships: ${relStr}`;
-  }
-  
   if (!playerAction) {
-    return `START ADVENTURE${contextStr}\n\nBegin an engaging opening that hooks the player and establishes meaningful choices from the start.`;
+    // First message - include full context
+    return `START ADVENTURE\n📊 Turn ${turnCount}/475 (${Math.floor((turnCount / 475) * 100)}%)\n🎮 Stats: ${statsStr}\n\nBegin an engaging opening that hooks the player and establishes meaningful choices from the start.`;
   }
 
-  return `PLAYER ACTION: "${playerAction}"${contextStr}\n\nContinue the story, showing consequences of this action. Reference past choices when relevant. Create meaningful next choices.`;
+  // Continuation - only send action and current stats (Responses API remembers the rest)
+  return `PLAYER ACTION: "${playerAction}"\n🎮 Current Stats: ${statsStr}\n\nContinue the story with consequences.`;
 }
 
 export default { generateStory };
