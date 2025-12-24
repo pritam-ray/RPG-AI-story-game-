@@ -17,6 +17,26 @@ function CharacterStats({ stats, inventory }) {
     <div className="character-stats">
       <h3>Character Stats</h3>
       
+      {/* Level and Experience */}
+      {stats.level && (
+        <div className="level-container">
+          <div className="level-badge">
+            ⭐ Level {stats.level}
+          </div>
+          <div className="xp-bar">
+            <div className="xp-label">XP: {stats.experience || 0}/{stats.level * 100}</div>
+            <div className="xp-progress">
+              <div 
+                className="xp-fill" 
+                style={{ 
+                  width: `${((stats.experience || 0) / (stats.level * 100)) * 100}%`
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className="stats-grid">
         <div className="stat-item health">
           <div className="stat-label">❤️ Health</div>

@@ -18,19 +18,27 @@ router.post("/start", async (req, res) => {
       return res.status(400).json({ error: "Theme is required" });
     }
 
-    // Initialize game state
+    // Initialize game state with progression tracking
     const sessionId = generateSessionId();
     const gameState = {
       sessionId,
+      previousResponseId: null, // Will be set after first response
       theme,
       characterName: characterName || "Adventurer",
+      turnCount: 0, // Track total choices made
       characterStats: {
         health: 100,
         mana: 50,
         strength: 10,
         intelligence: 10,
         charisma: 10,
+        level: 1, // Character level
+        experience: 0, // XP for progression
       },
+      achievements: [], // Track major accomplishments
+      majorChoices: [], // Track pivotal story decisions
+      relationships: {}, // Track NPCs and faction relationships
+      storyArc: "beginning", // beginning, rising, climax, resolution, ending
       inventory: [],
       storyHistory: [],
       createdAt: new Date(),
@@ -38,6 +46,9 @@ router.post("/start", async (req, res) => {
 
     // Generate opening story
     const storyResponse = await generateStory(gameState, null);
+
+    // Store the response ID for future chaining
+    gameState.previousResponseId = storyResponse.responseId;
 
     // Update game state with first story entry
     gameState.storyHistory.push({
@@ -50,6 +61,20 @@ router.post("/start", async (req, res) => {
     // Apply any stat changes from opening
     if (storyResponse.statChanges) {
       applyStatChanges(gameState.characterStats, storyResponse.statChanges);
+    }
+
+    // Track achievements and major choices
+    if (storyResponse.achievements) {
+      gameState.achievements.push(...storyResponse.achievements);
+    }
+    if (storyResponse.majorChoice) {
+      gameState.majorChoices.push(storyResponse.majorChoice);
+    }
+    if (storyResponse.relationships) {
+      Object.assign(gameState.relationships, storyResponse.relationships);
+    }
+    if (storyResponse.storyArc) {
+      gameState.storyArc = storyResponse.storyArc;
     }
 
     // Add any items found
@@ -76,6 +101,10 @@ router.post("/start", async (req, res) => {
       choices: storyResponse.choices,
       characterStats: gameState.characterStats,
       inventory: gameState.inventory,
+      turnCount: gameState.turnCount,
+      achievements: gameState.achievements,
+      storyArc: gameState.storyArc,
+      isGameEnding: gameState.turnCount >= 450,
     });
   } catch (error) {
     console.error("Error starting game:", error);
@@ -100,8 +129,14 @@ router.post("/action", async (req, res) => {
       return res.status(404).json({ error: "Game session not found" });
     }
 
+    // Increment turn counter
+    gameState.turnCount++;
+
     // Generate next part of story
     const storyResponse = await generateStory(gameState, action);
+
+    // Store the new response ID for future chaining
+    gameState.previousResponseId = storyResponse.responseId;
 
     // Update the last entry with the player's action
     if (gameState.storyHistory.length > 0) {
@@ -119,6 +154,29 @@ router.post("/action", async (req, res) => {
     // Apply stat changes
     if (storyResponse.statChanges) {
       applyStatChanges(gameState.characterStats, storyResponse.statChanges);
+    }
+
+    // Track achievements and major choices
+    if (storyResponse.achievements) {
+      gameState.achievements.push(...storyResponse.achievements);
+    }
+    if (storyResponse.majorChoice) {
+      gameState.majorChoices.push(storyResponse.majorChoice);
+    }
+    if (storyResponse.relationships) {
+      Object.assign(gameState.relationships, storyResponse.relationships);
+    }
+    if (storyResponse.storyArc) {
+      gameState.storyArc = storyResponse.storyArc;
+    }
+
+    // Level up system
+    if (gameState.characterStats.experience >= gameState.characterStats.level * 100) {
+      gameState.characterStats.level++;
+      gameState.characterStats.experience = 0;
+      // Boost stats on level up
+      gameState.characterStats.health = Math.min(gameState.characterStats.health + 20, 100 + (gameState.characterStats.level * 10));
+      gameState.characterStats.mana = Math.min(gameState.characterStats.mana + 10, 100 + (gameState.characterStats.level * 5));
     }
 
     // Add any items found
@@ -147,6 +205,12 @@ router.post("/action", async (req, res) => {
       statChanges: storyResponse.statChanges,
       itemsFound: storyResponse.itemsFound,
       itemsUsed: storyResponse.itemsUsed,
+      turnCount: gameState.turnCount,
+      achievements: storyResponse.achievements || [],
+      newAchievements: storyResponse.achievements || [],
+      storyArc: gameState.storyArc,
+      isGameEnding: gameState.turnCount >= 450,
+      majorChoice: storyResponse.majorChoice,
     });
   } catch (error) {
     console.error("Error processing action:", error);
@@ -172,6 +236,12 @@ router.get("/state/:sessionId", (req, res) => {
     characterStats: gameState.characterStats,
     inventory: gameState.inventory,
     storyHistory: gameState.storyHistory,
+    turnCount: gameState.turnCount,
+    achievements: gameState.achievements,
+    majorChoices: gameState.majorChoices,
+    relationships: gameState.relationships,
+    storyArc: gameState.storyArc,
+    isGameEnding: gameState.turnCount >= 450,
   });
 });
 

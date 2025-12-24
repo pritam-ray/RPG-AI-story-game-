@@ -10,112 +10,78 @@ const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME;
 
 const client = new OpenAI({
   apiKey: apiKey,
-  baseURL: `${endpoint}/openai/deployments/${deploymentName}`,
+  baseURL: `${endpoint}/openai/v1`,
   defaultQuery: { "api-version": apiVersion },
   defaultHeaders: { "api-key": apiKey },
 });
 
 /**
- * Generate story continuation based on game state and player action
+ * Generate story continuation using Responses API
+ * The Responses API maintains conversation context on Azure's servers
+ * by chaining responses together using previous_response_id
  */
 export async function generateStory(gameState, playerAction) {
   try {
-    const messages = buildMessages(gameState, playerAction);
+    const { theme, previousResponseId, characterStats, turnCount, achievements, majorChoices, storyArc, relationships } = gameState;
 
-    const response = await client.chat.completions.create({
+    // Get system prompt for this theme
+    const instructions = getSystemPrompt(theme, turnCount);
+
+    // Build user message with progression context
+    const userMessage = buildUserMessage(playerAction, characterStats, turnCount, achievements, majorChoices, storyArc, relationships);
+
+    // Create response with proper chaining
+    const requestParams = {
       model: deploymentName,
-      messages: messages,
+      instructions: instructions,
+      input: [
+        {
+          role: "user",
+          content: userMessage,
+        }
+      ],
       temperature: 0.8,
-      max_tokens: 350,
-      response_format: { type: "json_object" },
-    });
+    };
 
-    const content = response.choices[0].message.content;
-    const parsed = JSON.parse(content);
-    
-    // Log token usage for monitoring
-    if (response.usage) {
-      console.log('Token usage:', response.usage);
+    // If this is a continuation, include the previous response ID
+    if (previousResponseId) {
+      requestParams.previous_response_id = previousResponseId;
     }
+
+    const response = await client.responses.create(requestParams);
+
+    // Extract the text output from the response
+    const outputText = response.output
+      .filter(item => item.type === "message" && item.role === "assistant")
+      .map(item => item.content
+        .filter(content => content.type === "output_text")
+        .map(content => content.text)
+        .join("")
+      )
+      .join("");
+
+    const parsed = JSON.parse(outputText);
     
-    return parsed;
+    console.log('Story generated successfully via Responses API');
+    console.log('Token usage:', response.usage);
+    
+    // Return both the parsed content and the response ID for chaining
+    return {
+      ...parsed,
+      responseId: response.id,
+    };
   } catch (error) {
-    console.error("Azure OpenAI Error:", error);
+    console.error("Azure OpenAI Responses API Error:", error);
     throw new Error(`Failed to generate story: ${error.message}`);
   }
 }
 
-/**
- * Build message array for Azure OpenAI
- * Only keeps last 3 turns + summary to reduce tokens
- */
-function buildMessages(gameState, playerAction) {
-  const { theme, characterStats, storyHistory } = gameState;
 
-  const systemPrompt = getSystemPrompt(theme);
-  const messages = [{ role: "system", content: systemPrompt }];
-
-  // Handle story history with summarization
-  if (storyHistory && storyHistory.length > 0) {
-    const KEEP_LAST_N_TURNS = 3;
-    
-    if (storyHistory.length > KEEP_LAST_N_TURNS) {
-      // Add summary of older history
-      const oldHistory = storyHistory.slice(0, -KEEP_LAST_N_TURNS);
-      const summary = summarizeHistory(oldHistory);
-      messages.push({
-        role: "system",
-        content: `Previous story summary: ${summary}`,
-      });
-      
-      // Add only recent turns
-      const recentHistory = storyHistory.slice(-KEEP_LAST_N_TURNS);
-      recentHistory.forEach((entry) => {
-        messages.push({
-          role: "assistant",
-          content: JSON.stringify({
-            narration: entry.narration,
-            choices: entry.choices,
-          }),
-        });
-        if (entry.playerAction) {
-          messages.push({
-            role: "user",
-            content: `Player chose: ${entry.playerAction}`,
-          });
-        }
-      });
-    } else {
-      // Less than threshold, include all history
-      storyHistory.forEach((entry) => {
-        messages.push({
-          role: "assistant",
-          content: JSON.stringify({
-            narration: entry.narration,
-            choices: entry.choices,
-          }),
-        });
-        if (entry.playerAction) {
-          messages.push({
-            role: "user",
-            content: `Player chose: ${entry.playerAction}`,
-          });
-        }
-      });
-    }
-  }
-
-  // Add current player action
-  const userMessage = buildUserMessage(playerAction, characterStats);
-  messages.push({ role: "user", content: userMessage });
-
-  return messages;
-}
 
 /**
- * Get system prompt based on theme
+ * Get system prompt based on theme with progression tracking
  */
-function getSystemPrompt(theme) {
+function getSystemPrompt(theme, turnCount = 0) {
   const themeDescriptions = {
     "medieval-fantasy": "a classic medieval fantasy world with knights, dragons, magic, and ancient kingdoms",
     "sci-fi-space": "a futuristic sci-fi universe with space travel, alien civilizations, advanced technology, and cosmic mysteries",
@@ -126,19 +92,72 @@ function getSystemPrompt(theme) {
   };
 
   const themeDesc = themeDescriptions[theme] || themeDescriptions["medieval-fantasy"];
+  
+  // Calculate story progression (450-500 turn game)
+  const progressPercent = Math.min(100, (turnCount / 475) * 100);
+  let storyPhase = "beginning";
+  let phaseGuidance = "Introduce world, characters, and initial conflicts. Build intrigue.";
+  
+  if (progressPercent < 20) {
+    storyPhase = "beginning";
+    phaseGuidance = "Establish setting, introduce key NPCs, create initial hooks and mysteries. Make player feel agency.";
+  } else if (progressPercent < 50) {
+    storyPhase = "rising";
+    phaseGuidance = "Escalate stakes, reveal consequences of early choices, deepen relationships. Past decisions start affecting current situations.";
+  } else if (progressPercent < 75) {
+    storyPhase = "climax";
+    phaseGuidance = "Build toward major confrontations. Past choices create advantages/disadvantages. High-stakes decisions.";
+  } else if (progressPercent < 95) {
+    storyPhase = "resolution";
+    phaseGuidance = "Resolve major plot threads. Show consequences of all past choices. Tie up character arcs.";
+  } else {
+    storyPhase = "ending";
+    phaseGuidance = "Deliver satisfying conclusion. Reflect on journey. Show final outcome based on cumulative choices.";
+  }
 
-  return `You are a Dungeon Master for an RPG set in ${themeDesc}.
+  return `You are a master Dungeon Master creating a psychologically engaging, choice-driven RPG in ${themeDesc}.
 
-RULES:
-- Write 2-3 short, clear paragraphs
-- Simple descriptions, concrete details (colors, sounds, emotions)
-- Show character growth through actions
-- Provide 3-4 meaningful choices
-- Consider player stats in outcomes
-- Straightforward language, familiar concepts
-- Track items found/used accurately
+🎯 GAME DESIGN (450-500 TURN COMPLETE STORY):
+- Current Progress: ${Math.floor(progressPercent)}% (Turn ${turnCount}/475)
+- Story Phase: ${storyPhase.toUpperCase()}
+- Phase Guidance: ${phaseGuidance}
 
-STATS: Health (survival), Mana (magic), Strength (physical), Intelligence (problem-solving), Charisma (persuasion).
+🎭 PSYCHOLOGICAL ENGAGEMENT:
+- Every choice MUST have meaningful consequences (immediate or delayed)
+- Reference past player decisions - create callback moments that show impact
+- Build complex NPCs with memories - they remember player's actions
+- Create moral dilemmas with no perfect answer
+- Reward clever solutions, punish reckless behavior
+- Make player feel their choices truly matter
+
+📊 CHARACTER PROGRESSION:
+- Award +10-30 experience for significant accomplishments
+- Grant achievements for major milestones ("First Blood", "Peacemaker", "Master Thief", etc.)
+- Track relationships: allies/enemies created by choices affect future encounters
+- Character arc: show growth from naive to seasoned based on experiences
+
+⚡ CHOICE DESIGN:
+- Provide 3-4 meaningful, distinct choices
+- Each choice should reflect different character traits (brave/cautious, kind/ruthless, clever/direct)
+- Some choices should be clearly risky but rewarding
+- Avoid "correct" answers - create trade-offs
+- Choices in early game should echo in later consequences
+
+🎬 NARRATIVE STRUCTURE:
+- Beginning (0-20%): Introduce world, establish stakes, create mysteries
+- Rising (20-50%): Escalate conflicts, reveal consequences, deepen bonds
+- Climax (50-75%): Major confrontations, past choices create outcomes
+- Resolution (75-95%): Resolve arcs, show cumulative impact of choices
+- Ending (95-100%): Deliver satisfying conclusion reflecting player's journey
+
+📝 WRITING STYLE:
+- 2-3 vivid paragraphs with emotional weight
+- Show consequences of recent actions in current scene
+- Mention specific past choices when relevant
+- Create tension and urgency appropriate to story phase
+- Use sensory details and character emotions
+
+STATS: Health (survival), Mana (magic), Strength (physical), Intelligence (problem-solving), Charisma (persuasion), Level (overall power), Experience (growth).
 
 STYLE: Direct sentences, one scene at a time, concrete details, step-by-step action, show growth through achievements.
 
@@ -148,65 +167,97 @@ INVENTORY:
 
 RESPONSE FORMAT - You MUST respond with valid JSON only:
 {
-  "narration": "The story text here with clear, simple descriptions...",
+  "narration": "The story text here with emotional weight and consequences...",
   "choices": [
-    "First choice description",
-    "Second choice description",
-    "Third choice description",
-    "Fourth choice description (optional)"
+    "First choice (distinct character trait/approach)",
+    "Second choice (different trait/consequence)",
+    "Third choice (alternative path)",
+    "Fourth choice (risky/rewarding option - optional)"
   ],
   "statChanges": {
     "health": 0,
     "mana": 0,
     "strength": 0,
     "intelligence": 0,
-    "charisma": 0
+    "charisma": 0,
+    "experience": 0
   },
   "itemsFound": [],
-  "itemsUsed": []
+  "itemsUsed": [],
+  "achievements": [],
+  "majorChoice": null,
+  "relationships": {},
+  "storyArc": "beginning/rising/climax/resolution/ending"
 }
 
-INVENTORY MANAGEMENT:
-- The statChanges should reflect consequences of previous actions (damage taken, mana used, stat improvements). Use negative numbers for losses, positive for gains. Leave at 0 if no change.
-- The itemsFound array should list any new items the player discovered (can be empty array if none). Be specific with item names.
-- The itemsUsed array should list any items the player used or consumed in this action (can be empty array if none). Items listed here will be REMOVED from inventory.
-- When a player uses an item (potion, tool, weapon, etc.), always include it in itemsUsed.
-- When a player finds, picks up, or receives items, include them in itemsFound.
-- Be consistent with item names - if you add "Health Potion", remove "Health Potion" (exact match).`;
+FIELD GUIDANCE:
+
+📈 statChanges:
+- experience: Award +10-30 for accomplishments, challenges overcome, clever solutions
+- health/mana: Reflect combat, magic use, healing
+- strength/intelligence/charisma: Increase +1 when player demonstrates exceptional use
+- Use negative values for damage/costs, positive for gains
+
+🏆 achievements (array of strings):
+- Award for significant milestones: ["First Kill", "Saved the Village", "Master Negotiator"]
+- Make them memorable and specific to player's actions
+- Only include if player accomplished something notable this turn
+
+🎯 majorChoice (string or null):
+- Set to brief description if this choice will have major future consequences
+- Example: "Spared the enemy captain" or "Stole from the guild"
+- These will be referenced later to create callback moments
+
+👥 relationships (object):
+- Track NPC/faction standing: {"Guard Captain": "allied", "Thieves Guild": "hostile"}
+- Update when player actions affect relationships
+- Use values: "allied", "friendly", "neutral", "suspicious", "hostile", "enemy"
+
+📖 storyArc (string):
+- Update to reflect narrative progression: "beginning", "rising", "climax", "resolution", "ending"
+- Consider pacing and turn count when advancing the arc
+- Move toward "ending" as turns approach 450-500
+
+🎒 inventory:
+- itemsFound: New items discovered (be specific)
+- itemsUsed: Items consumed/used (exact names, will be removed)
+- Be consistent with naming
+
+💡 REMEMBER:
+- Reference past player choices in narration when relevant
+- Create consequences that span multiple turns
+- Make choices feel weighty and impactful
+- Build toward satisfying conclusion that reflects player's journey`;
 }
 
 /**
- * Build user message with player action and stats
+ * Build user message with player action and progression context
  */
-function buildUserMessage(playerAction, characterStats) {
-  const statsStr = `HP:${characterStats.health} MP:${characterStats.mana} STR:${characterStats.strength} INT:${characterStats.intelligence} CHA:${characterStats.charisma}`;
+function buildUserMessage(playerAction, characterStats, turnCount = 0, achievements = [], majorChoices = [], storyArc = "beginning", relationships = {}) {
+  const statsStr = `HP:${characterStats.health} MP:${characterStats.mana} STR:${characterStats.strength} INT:${characterStats.intelligence} CHA:${characterStats.charisma} LVL:${characterStats.level || 1} XP:${characterStats.experience || 0}`;
+  
+  const progressContext = `Turn ${turnCount}/475 (${Math.floor((turnCount / 475) * 100)}%) | Phase: ${storyArc}`;
+  
+  let contextStr = `\n📊 ${progressContext}\n🎮 Stats: ${statsStr}`;
+  
+  if (achievements.length > 0) {
+    contextStr += `\n🏆 Achievements: ${achievements.slice(-3).join(", ")}`;
+  }
+  
+  if (majorChoices.length > 0) {
+    contextStr += `\n📜 Recent Major Choices: ${majorChoices.slice(-3).join("; ")}`;
+  }
+  
+  if (Object.keys(relationships).length > 0) {
+    const relStr = Object.entries(relationships).slice(-3).map(([npc, status]) => `${npc}(${status})`).join(", ");
+    contextStr += `\n👥 Relationships: ${relStr}`;
+  }
   
   if (!playerAction) {
-    return `Start adventure. Stats: ${statsStr}. Create clear opening scene.`;
+    return `START ADVENTURE${contextStr}\n\nBegin an engaging opening that hooks the player and establishes meaningful choices from the start.`;
   }
 
-  return `Action: ${playerAction}. Stats: ${statsStr}. Continue story.`;
-}
-
-/**
- * Summarize older story history to reduce token usage
- */
-function summarizeHistory(historyEntries) {
-  if (!historyEntries || historyEntries.length === 0) {
-    return "The adventure has just begun.";
-  }
-
-  // Extract key events from old history
-  const keyEvents = historyEntries
-    .filter(entry => entry.playerAction)
-    .map(entry => entry.playerAction)
-    .slice(-5); // Last 5 actions from old history
-
-  if (keyEvents.length === 0) {
-    return "The story started with an introduction to the world.";
-  }
-
-  return `Earlier in the adventure: ${keyEvents.join('; then ')}.`;
+  return `PLAYER ACTION: "${playerAction}"${contextStr}\n\nContinue the story, showing consequences of this action. Reference past choices when relevant. Create meaningful next choices.`;
 }
 
 export default { generateStory };

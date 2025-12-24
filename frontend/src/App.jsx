@@ -22,6 +22,11 @@ function App() {
   const [error, setError] = useState(null);
   const [statChanges, setStatChanges] = useState(null);
   const [itemChanges, setItemChanges] = useState(null);
+  const [turnCount, setTurnCount] = useState(0);
+  const [achievements, setAchievements] = useState([]);
+  const [newAchievements, setNewAchievements] = useState([]);
+  const [storyArc, setStoryArc] = useState('beginning');
+  const [isGameEnding, setIsGameEnding] = useState(false);
 
   // Load themes on mount
   useEffect(() => {
@@ -53,6 +58,10 @@ function App() {
       setCurrentChoices(response.choices);
       setCharacterStats(response.characterStats);
       setInventory(response.inventory || []);
+      setTurnCount(response.turnCount || 0);
+      setAchievements(response.achievements || []);
+      setStoryArc(response.storyArc || 'beginning');
+      setIsGameEnding(response.isGameEnding || false);
       setStoryHistory([{
         narration: response.narration,
         choices: response.choices,
@@ -94,7 +103,21 @@ function App() {
       setCurrentChoices(response.choices);
       setCharacterStats(response.characterStats);
       setInventory(response.inventory || []);
+      setTurnCount(response.turnCount || 0);
+      setStoryArc(response.storyArc || 'beginning');
+      setIsGameEnding(response.isGameEnding || false);
       setStoryHistory(updatedHistory);
+
+      // Update achievements
+      if (response.achievements && response.achievements.length > 0) {
+        setAchievements(prev => [...prev, ...response.achievements]);
+      }
+
+      // Show new achievements notification
+      if (response.newAchievements && response.newAchievements.length > 0) {
+        setNewAchievements(response.newAchievements);
+        setTimeout(() => setNewAchievements([]), 5000);
+      }
 
       // Show stat changes notification
       if (response.statChanges) {
@@ -138,6 +161,11 @@ function App() {
     setError(null);
     setStatChanges(null);
     setItemChanges(null);
+    setTurnCount(0);
+    setAchievements([]);
+    setNewAchievements([]);
+    setStoryArc('beginning');
+    setIsGameEnding(false);
   };
 
   return (
@@ -165,6 +193,33 @@ function App() {
               New Game
             </button>
           </div>
+
+          {/* Progress Bar */}
+          <div className="progress-container">
+            <div className="progress-info">
+              <span>📊 Turn {turnCount}/475 ({Math.floor((turnCount / 475) * 100)}%)</span>
+              <span>📖 {storyArc.toUpperCase()}</span>
+              <span>🏆 {achievements.length} Achievements</span>
+            </div>
+            <div className="progress-bar">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${Math.min(100, (turnCount / 475) * 100)}%` }}
+              />
+            </div>
+            {isGameEnding && (
+              <div className="ending-warning">
+                ⚠️ Story approaching conclusion...
+              </div>
+            )}
+          </div>
+
+          {/* New Achievement Notifications */}
+          {newAchievements && newAchievements.length > 0 && (
+            <div className="achievement-notification">
+              🏆 Achievement Unlocked: {newAchievements.join(', ')}
+            </div>
+          )}
 
           <div className="game-layout">
             <div className="main-content">
